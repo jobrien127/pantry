@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Observation
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -138,7 +139,7 @@ struct AddItemView: View {
 }
 
 struct ItemDetailView: View {
-    @ObservedObject var item: Item
+    @Bindable var item: Item
     let viewModel: PantryViewModel
     
     var body: some View {
