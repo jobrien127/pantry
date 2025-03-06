@@ -11,7 +11,7 @@ import Observation
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Query(sort: \Item.name) private var items: [Item]
     @State private var showingAddItem = false
     @State private var showingSuggestions = false
     
@@ -107,10 +107,11 @@ struct AddItemView: View {
                 if hasExpirationDate {
                     DatePicker("Expiration Date",
                               selection: Binding(
-                                get: { expirationDate ?? Date() },
-                                set: { expirationDate = $0 }
+                                get: { expirationDate ?? Calendar.current.startOfDay(for: Date()) },
+                                set: { expirationDate = Calendar.current.startOfDay(for: $0) }
                               ),
-                              in: Date()...)
+                              in: Calendar.current.startOfDay(for: Date())...,
+                              displayedComponents: .date)
                 }
             }
             .navigationTitle("Add Item")

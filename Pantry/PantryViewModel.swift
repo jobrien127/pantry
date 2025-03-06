@@ -1,28 +1,73 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import Combine
 
 @Observable
 class PantryViewModel {
     let modelContext: ModelContext
+    private var cancellables = Set<AnyCancellable>()
+    private(set) var suggestions: [String] = []
+    private(set) var notificationStatus: Bool = false
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         setupNotifications()
+        setupSuggestionUpdates()
     }
     
     private func setupNotifications() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if granted {
-                print("Notification permission granted")
-            } else if let error = error {
-                print("Error requesting notification permission: \(error)")
+        // Check current notification settings
+        Future<UNNotificationSettings, Never> { promise in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                promise(.success(settings))
             }
         }
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] settings in
+            self?.notificationStatus = settings.authorizationStatus == .authorized
+        }
+        .store(in: &cancellables)
+        
+        // Request authorization
+        Future<Bool, Error> { promise in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                if let error = error {
+                    promise(.failure(error))
+                } else {
+                    promise(.success(granted))
+                }
+            }
+        }
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("Error requesting notification permission: \(error)")
+                }
+            },
+            receiveValue: { [weak self] granted in
+                self?.notificationStatus = granted
+            }
+        )
+        .store(in: &cancellables)
+    }
+    
+    private func setupSuggestionUpdates() {
+        // Initial update
+        updateSuggestions()
+        
+        // Update suggestions every hour
+        Timer.publish(every: 3600, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.updateSuggestions()
+            }
+            .store(in: &cancellables)
     }
     
     func scheduleExpirationNotification(for item: Item) {
-        guard item.notificationEnabled,
+        guard notificationStatus,
               let expirationDate = item.expirationDate else { return }
         
         // Schedule notification 3 days before expiration
@@ -38,15 +83,33 @@ class PantryViewModel {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         
         let request = UNNotificationRequest(identifier: "expiration-\(item.name)", content: content, trigger: trigger)
-        UNUserNotificationCenter.current().add(request)
+        
+        Future<Void, Error> { promise in
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    promise(.failure(error))
+                } else {
+                    promise(.success(()))
+                }
+            }
+        }
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("Failed to schedule notification: \(error)")
+                }
+            },
+            receiveValue: {}
+        )
+        .store(in: &cancellables)
     }
     
-    func getSuggestions() -> [String] {
+    private func updateSuggestions() {
         do {
             let descriptor = FetchDescriptor<Item>()
             let items = try modelContext.fetch(descriptor)
             
-            // Analyze purchase patterns
             let frequentItems = Dictionary(grouping: items) { $0.name }
                 .mapValues { items in
                     let purchases = items.first?.purchaseHistory.count ?? 0
@@ -58,16 +121,17 @@ class PantryViewModel {
                     return (purchases: purchases, daysSince: daysSinceLastPurchase)
                 }
             
-            // Suggest items that are:
-            // 1. Frequently purchased (more than 3 times)
-            // 2. Haven't been purchased recently (over 2 weeks)
-            return frequentItems
+            suggestions = frequentItems
                 .filter { $0.value.purchases >= 3 && $0.value.daysSince >= 14 }
                 .map { $0.key }
                 .sorted()
         } catch {
             print("Error fetching items for suggestions: \(error)")
-            return []
+            suggestions = []
         }
+    }
+    
+    func getSuggestions() -> [String] {
+        suggestions
     }
 }

@@ -10,7 +10,7 @@ import SwiftData
 
 @main
 struct PantryApp: App {
-    var sharedModelContainer: ModelContainer = {
+    let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
         ])

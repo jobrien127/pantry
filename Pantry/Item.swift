@@ -10,7 +10,7 @@ import SwiftData
 
 @Model
 final class Item {
-    var name: String
+    @Attribute(.unique) var name: String
     var quantity: Int
     var expirationDate: Date?
     var lastPurchased: Date
@@ -21,21 +21,22 @@ final class Item {
     init(name: String, quantity: Int = 1, expirationDate: Date? = nil) {
         self.name = name
         self.quantity = quantity
-        self.expirationDate = expirationDate
-        self.lastPurchased = Date()
-        self.purchaseHistory = [Date()]
+        self.expirationDate = expirationDate.map { Calendar.current.startOfDay(for: $0) }
+        self.lastPurchased = Calendar.current.startOfDay(for: Date())
+        self.purchaseHistory = [Calendar.current.startOfDay(for: Date())]
         self.usageHistory = []
         self.notificationEnabled = expirationDate != nil
     }
     
     func recordPurchase() {
-        lastPurchased = Date()
-        purchaseHistory.append(lastPurchased)
+        let now = Calendar.current.startOfDay(for: Date())
+        lastPurchased = now
+        purchaseHistory.append(now)
     }
     
     func recordUsage() {
         quantity = max(0, quantity - 1)
-        usageHistory.append(Date())
+        usageHistory.append(Calendar.current.startOfDay(for: Date()))
     }
     
     var daysUntilExpiration: Int? {
