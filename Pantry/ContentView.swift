@@ -11,14 +11,14 @@ import Observation
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Item.name) private var items: [Item]
+    @Query(FetchDescriptor<Item>(sortBy: [SortDescriptor<Item>(\.name)])) private var items: [Item]
     @State private var showingAddItem = false
     @State private var showingSuggestions = false
     
-    private let viewModel: PantryViewModel
+    @StateObject private var viewModel: PantryViewModel
     
     init(modelContext: ModelContext) {
-        self.viewModel = PantryViewModel(modelContext: modelContext)
+        _viewModel = StateObject(wrappedValue: PantryViewModel(modelContext: modelContext))
     }
     
     var body: some View {
@@ -55,7 +55,7 @@ struct ContentView: View {
             AddItemView(viewModel: viewModel)
         }
         .sheet(isPresented: $showingSuggestions) {
-            SuggestionsView(suggestions: viewModel.getSuggestions())
+            SuggestionsView(viewModel: viewModel)
         }
     }
     
@@ -91,12 +91,13 @@ struct ItemRowView: View {
 
 struct AddItemView: View {
     @Environment(\.dismiss) private var dismiss
-    let viewModel: PantryViewModel
+    @ObservedObject var viewModel: PantryViewModel
     
     @State private var name = ""
     @State private var quantity = 1
     @State private var expirationDate: Date? = nil
     @State private var hasExpirationDate = false
+    @State private var showError = false
     
     var body: some View {
         NavigationView {
@@ -119,10 +120,17 @@ struct AddItemView: View {
                 leading: Button("Cancel") { dismiss() },
                 trailing: Button("Add") {
                     addItem()
-                    dismiss()
                 }
                 .disabled(name.isEmpty)
             )
+            .alert("Error", isPresented: $showError, presenting: viewModel.error) { _ in
+                Button("OK") { }
+            } message: { error in
+                Text(error.localizedDescription)
+            }
+            .onChange(of: viewModel.error) { _, error in
+                showError = error != nil
+            }
         }
     }
     
@@ -132,16 +140,18 @@ struct AddItemView: View {
             quantity: quantity,
             expirationDate: hasExpirationDate ? expirationDate : nil
         )
-        viewModel.modelContext.insert(item)
-        if hasExpirationDate {
-            viewModel.scheduleExpirationNotification(for: item)
+        viewModel.addItem(item)
+        
+        // Only dismiss if there's no error
+        if viewModel.error == nil {
+            dismiss()
         }
     }
 }
 
 struct ItemDetailView: View {
     @Bindable var item: Item
-    let viewModel: PantryViewModel
+    @ObservedObject var viewModel: PantryViewModel
     
     var body: some View {
         Form {
@@ -174,16 +184,16 @@ struct ItemDetailView: View {
 
 struct SuggestionsView: View {
     @Environment(\.dismiss) private var dismiss
-    let suggestions: [String]
+    @ObservedObject var viewModel: PantryViewModel
     
     var body: some View {
         NavigationView {
             List {
-                if suggestions.isEmpty {
+                if viewModel.suggestions.isEmpty {
                     Text("No suggestions available yet. Keep using the app to get personalized recommendations!")
                         .foregroundColor(.secondary)
                 } else {
-                    ForEach(suggestions, id: \.self) { suggestion in
+                    ForEach(viewModel.suggestions, id: \.self) { suggestion in
                         Text(suggestion)
                     }
                 }

@@ -9,7 +9,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class Item {
+final class Item: Identifiable {
     @Attribute(.unique) var name: String
     var quantity: Int
     var expirationDate: Date?

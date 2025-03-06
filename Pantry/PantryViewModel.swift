@@ -3,17 +3,90 @@ import SwiftData
 import UserNotifications
 import Combine
 
-@Observable
-class PantryViewModel {
+enum PantryError: LocalizedError, Equatable {
+    case duplicateItem(name: String)
+    case invalidItem
+    case notificationFailure(Error)
+    
+    var errorDescription: String? {
+        switch self {
+        case .duplicateItem(let name):
+            return "An item named '\(name)' already exists"
+        case .invalidItem:
+            return "Invalid item data"
+        case .notificationFailure(let error):
+            return "Notification error: \(error.localizedDescription)"
+        }
+    }
+    
+    static func == (lhs: PantryError, rhs: PantryError) -> Bool {
+        switch (lhs, rhs) {
+        case (.duplicateItem(let lName), .duplicateItem(let rName)):
+            return lName == rName
+        case (.invalidItem, .invalidItem):
+            return true
+        case (.notificationFailure(let lError), .notificationFailure(let rError)):
+            return lError.localizedDescription == rError.localizedDescription
+        default:
+            return false
+        }
+    }
+}
+
+class PantryViewModel: ObservableObject {
     let modelContext: ModelContext
     private var cancellables = Set<AnyCancellable>()
-    private(set) var suggestions: [String] = []
-    private(set) var notificationStatus: Bool = false
+    
+    @Published private(set) var suggestions: [String] = []
+    @Published private(set) var notificationStatus: Bool = false
+    @Published private(set) var error: PantryError?
+    
+    private let itemSubject = PassthroughSubject<Item, Never>()
+    private let errorSubject = PassthroughSubject<PantryError, Never>()
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         setupNotifications()
         setupSuggestionUpdates()
+        setupErrorHandling()
+    }
+    
+    private func setupErrorHandling() {
+        errorSubject
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] error in
+                self?.error = error
+                // Auto-clear error after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    self?.error = nil
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    func addItem(_ item: Item) {
+        do {
+            // Check for duplicate
+            let descriptor = FetchDescriptor<Item>(
+                predicate: #Predicate<Item> { item in item.name == item.name },
+                sortBy: [SortDescriptor(\Item.name)]
+            )
+            let existing = try modelContext.fetch(descriptor)
+            
+            guard existing.isEmpty else {
+                errorSubject.send(.duplicateItem(name: item.name))
+                return
+            }
+            
+            modelContext.insert(item)
+            itemSubject.send(item)
+            
+            if item.notificationEnabled {
+                scheduleExpirationNotification(for: item)
+            }
+        } catch {
+            errorSubject.send(.invalidItem)
+        }
     }
     
     private func setupNotifications() {
@@ -41,9 +114,9 @@ class PantryViewModel {
         }
         .receive(on: DispatchQueue.main)
         .sink(
-            receiveCompletion: { completion in
+            receiveCompletion: { [weak self] completion in
                 if case .failure(let error) = completion {
-                    print("Error requesting notification permission: \(error)")
+                    self?.errorSubject.send(.notificationFailure(error))
                 }
             },
             receiveValue: { [weak self] granted in
@@ -54,16 +127,20 @@ class PantryViewModel {
     }
     
     private func setupSuggestionUpdates() {
+        // Combine item changes with timer updates
+        Publishers.Merge(
+            itemSubject.debounce(for: .seconds(1), scheduler: DispatchQueue.main),
+            Timer.publish(every: 3600, on: .main, in: .common)
+                .autoconnect()
+                .map { _ in Item(name: "", quantity: 0) } // Dummy item to trigger update
+        )
+        .sink { [weak self] _ in
+            self?.updateSuggestions()
+        }
+        .store(in: &cancellables)
+        
         // Initial update
         updateSuggestions()
-        
-        // Update suggestions every hour
-        Timer.publish(every: 3600, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.updateSuggestions()
-            }
-            .store(in: &cancellables)
     }
     
     func scheduleExpirationNotification(for item: Item) {
@@ -95,12 +172,12 @@ class PantryViewModel {
         }
         .receive(on: DispatchQueue.main)
         .sink(
-            receiveCompletion: { completion in
+            receiveCompletion: { [weak self] completion in
                 if case .failure(let error) = completion {
-                    print("Failed to schedule notification: \(error)")
+                    self?.errorSubject.send(.notificationFailure(error))
                 }
             },
-            receiveValue: {}
+            receiveValue: { }
         )
         .store(in: &cancellables)
     }
@@ -126,7 +203,7 @@ class PantryViewModel {
                 .map { $0.key }
                 .sorted()
         } catch {
-            print("Error fetching items for suggestions: \(error)")
+            errorSubject.send(.invalidItem)
             suggestions = []
         }
     }
