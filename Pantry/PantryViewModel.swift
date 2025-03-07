@@ -66,18 +66,7 @@ class PantryViewModel: ObservableObject {
     
     func addItem(_ item: Item) {
         do {
-            // Check for duplicate items
-            let descriptor = FetchDescriptor<Item>(
-                sortBy: [SortDescriptor(\Item.name)]
-            )
-            let items = try modelContext.fetch(descriptor)
-            
-            // Case-insensitive name comparison
-            guard !items.contains(where: { $0.name.lowercased() == item.name.lowercased() }) else {
-                errorSubject.send(.duplicateItem(name: item.name))
-                return
-            }
-            
+            // Insert item without checking for duplicate names since we're now using UUID as the unique identifier
             modelContext.insert(item)
             try modelContext.save()
             itemSubject.send(item)
@@ -87,6 +76,19 @@ class PantryViewModel: ObservableObject {
             }
         } catch let error {
             print("Failed to add item: \(error)")
+            errorSubject.send(.invalidItem)
+        }
+    }
+    
+    func deleteItems(_ items: [Item]) {
+        do {
+            // Delete items from the context
+            items.forEach { modelContext.delete($0) }
+            try modelContext.save()
+            
+            // Trigger suggestions update
+            itemSubject.send(Item(name: "", quantity: 0))
+        } catch {
             errorSubject.send(.invalidItem)
         }
     }
@@ -145,7 +147,7 @@ class PantryViewModel: ObservableObject {
         updateSuggestions()
     }
     
-    func scheduleExpirationNotification(for item: Item) {
+    public func scheduleExpirationNotification(for item: Item) {
         guard notificationStatus,
               let expirationDate = item.expirationDate else { return }
         
