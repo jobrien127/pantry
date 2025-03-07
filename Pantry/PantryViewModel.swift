@@ -66,25 +66,27 @@ class PantryViewModel: ObservableObject {
     
     func addItem(_ item: Item) {
         do {
-            // Check for duplicate
+            // Check for duplicate items
             let descriptor = FetchDescriptor<Item>(
-                predicate: #Predicate<Item> { item in item.name == item.name },
                 sortBy: [SortDescriptor(\Item.name)]
             )
-            let existing = try modelContext.fetch(descriptor)
+            let items = try modelContext.fetch(descriptor)
             
-            guard existing.isEmpty else {
+            // Case-insensitive name comparison
+            guard !items.contains(where: { $0.name.lowercased() == item.name.lowercased() }) else {
                 errorSubject.send(.duplicateItem(name: item.name))
                 return
             }
             
             modelContext.insert(item)
+            try modelContext.save()
             itemSubject.send(item)
             
             if item.notificationEnabled {
                 scheduleExpirationNotification(for: item)
             }
-        } catch {
+        } catch let error {
+            print("Failed to add item: \(error)")
             errorSubject.send(.invalidItem)
         }
     }

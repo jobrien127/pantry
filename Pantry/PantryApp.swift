@@ -15,24 +15,16 @@ struct PantryApp: App {
             Item.self,
         ])
         let modelConfiguration = ModelConfiguration(
-            schema: schema,
             isStoredInMemoryOnly: false
         )
 
         do {
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            return container
+            return try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
         } catch {
-            // Fallback to in-memory store if persistent store fails
-            print("Failed to create persistent store: \(error)")
-            print("Falling back to in-memory store")
-            
-            let fallbackConfiguration = ModelConfiguration(isStoredInMemoryOnly: true)
-            do {
-                return try ModelContainer(for: schema, configurations: [fallbackConfiguration])
-            } catch {
-                fatalError("Could not create ModelContainer: \(error)")
-            }
+            fatalError("Could not create ModelContainer: \(error)")
         }
     }()
 

@@ -11,13 +11,17 @@ import Observation
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(FetchDescriptor<Item>(sortBy: [SortDescriptor<Item>(\.name)])) private var items: [Item]
+    @Query private var items: [Item]
     @State private var showingAddItem = false
     @State private var showingSuggestions = false
+    @State private var error: Error?
+    @State private var showError = false
     
     @StateObject private var viewModel: PantryViewModel
     
     init(modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<Item>(sortBy: [SortDescriptor(\Item.name)])
+        _items = Query(descriptor)
         _viewModel = StateObject(wrappedValue: PantryViewModel(modelContext: modelContext))
     }
     
@@ -25,14 +29,19 @@ struct ContentView: View {
         NavigationSplitView {
             List {
                 Section("Inventory") {
-                    ForEach(items) { item in
-                        NavigationLink {
-                            ItemDetailView(item: item, viewModel: viewModel)
-                        } label: {
-                            ItemRowView(item: item)
+                    if items.isEmpty {
+                        Text("No items yet. Tap + to add items to your pantry.")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(items) { item in
+                            NavigationLink {
+                                ItemDetailView(item: item, viewModel: viewModel)
+                            } label: {
+                                ItemRowView(item: item)
+                            }
                         }
+                        .onDelete(perform: deleteItems)
                     }
-                    .onDelete(perform: deleteItems)
                 }
             }
             .navigationTitle("Pantry")
